@@ -166,6 +166,53 @@ def test_digit_converter_identifier_includes_num_digits_and_mapping():
     assert identifier.params["mapping"] == str(converter.mapping)
 
 
+def test_digit_converter_teaching_instructions_describe_marker_rules() -> None:
+    converter = DigitBijectionConverter(seed=42)
+
+    instructions = converter.get_teaching_instructions()
+
+    assert "For uppercase letters, prefix the lowercase letter's token with one apostrophe (')." in instructions
+    assert "Encode each literal apostrophe as two apostrophes ('')." in instructions
+    assert "Preserve spaces and all other punctuation." in instructions
+    assert (
+        "Consume doubled apostrophes as one literal apostrophe before checking for a single uppercase marker."
+        in instructions
+    )
+    assert "preserve spaces/punctuation" not in instructions
+    assert "write only the final answer in the same notation." in instructions
+    assert converter.FINAL_ANSWER_GUIDANCE in instructions
+
+
+@pytest.mark.parametrize(
+    ("prompt", "encoded_text"),
+    [("it's", "1829''28"), ("I'm", "'18''22")],
+)
+def test_digit_converter_teaching_instructions_include_contraction_examples(*, prompt: str, encoded_text: str) -> None:
+    custom_mapping = {letter: str(index + 10) for index, letter in enumerate(string.ascii_lowercase)}
+    converter = DigitBijectionConverter(mapping=custom_mapping)
+
+    instructions = converter.get_teaching_instructions()
+
+    assert f'"{prompt}" encodes to "{encoded_text}"' in instructions
+    assert converter.encode(prompt=prompt) == encoded_text
+    assert converter.decode(encoded_text) == prompt
+
+
+@pytest.mark.parametrize("num_digits", [2, 3, 4])
+def test_digit_converter_teaching_instructions_use_configured_mapping(num_digits: int) -> None:
+    converter = DigitBijectionConverter(num_digits=num_digits, seed=42)
+
+    instructions = converter.get_teaching_instructions()
+
+    assert f"{num_digits}-digit tokens" in instructions
+    for letter, token in converter.mapping.items():
+        assert f"{letter}={token}" in instructions
+    for prompt in ("it's", "I'm"):
+        encoded_text = converter.encode(prompt=prompt)
+        assert f'"{prompt}" encodes to "{encoded_text}"' in instructions
+        assert converter.decode(encoded_text) == prompt
+
+
 async def test_encode_prompt():
     converter = LetterBijectionConverter(fixed_size=0)
     result = await converter.convert_async(prompt="hello world")
