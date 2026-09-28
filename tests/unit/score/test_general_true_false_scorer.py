@@ -170,3 +170,51 @@ def test_true_false_get_scorer_metrics_returns_metrics_when_eval_hash_is_set(pat
 def test_general_true_false_no_chat_target_raises():
     with pytest.raises(ValueError, match="A chat_target must be provided"):
         SelfAskGeneralTrueFalseScorer(chat_target=None, system_prompt_format_string="prompt")
+
+
+async def test_general_true_false_scorer_uses_response_category_over_configured(patch_central_database):
+    chat_target = MagicMock()
+    chat_target.get_identifier.return_value = get_mock_target_identifier("MockChatTarget")
+    json_response = (
+        dedent(
+            """
+        {"score_value": "True",
+         "rationale": "This is the rationale.",
+         "category": "response_category"}
+        """
+        )
+        .strip()
+        .replace("\n", " ")
+    )
+    response = Message(message_pieces=[MessagePiece(role="assistant", original_value=json_response)])
+    chat_target.send_prompt_async = AsyncMock(return_value=[response])
+
+    scorer = SelfAskGeneralTrueFalseScorer(
+        chat_target=chat_target,
+        system_prompt_format_string="This is a system prompt.",
+        category="configured_category",
+    )
+
+    score = await scorer.score_text_async(text="test prompt")
+
+    assert len(score) == 1
+    assert score[0].score_category == ["response_category"]
+
+
+async def test_general_true_false_scorer_falls_back_to_configured_category(
+    patch_central_database, general_scorer_response: Message
+):
+    chat_target = MagicMock()
+    chat_target.get_identifier.return_value = get_mock_target_identifier("MockChatTarget")
+    chat_target.send_prompt_async = AsyncMock(return_value=[general_scorer_response])
+
+    scorer = SelfAskGeneralTrueFalseScorer(
+        chat_target=chat_target,
+        system_prompt_format_string="This is a system prompt.",
+        category="configured_category",
+    )
+
+    score = await scorer.score_text_async(text="test prompt")
+
+    assert len(score) == 1
+    assert score[0].score_category == ["configured_category"]

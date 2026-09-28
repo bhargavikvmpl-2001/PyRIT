@@ -33,10 +33,11 @@ def _build_unvalidated_score(
     scored_prompt_id: str | uuid.UUID,
     category: Sequence[str] | str | None,
     objective: str | None,
+    response_category_wins: bool = False,
 ) -> UnvalidatedScore:
     category_response = parsed_response.get(category_output_key)
 
-    if category_response is not None and category is not None:
+    if category_response is not None and category is not None and not response_category_wins:
         raise ValueError("Category is present in the response and an argument")
 
     # Validate and normalize category to a list of strings
@@ -160,6 +161,7 @@ class JsonSchemaResponseHandler(ResponseHandler):
         category_output_key: str = "category",
         response_schema: JsonSchemaDefinition | None = None,
         numeric_value: bool = False,
+        response_category_wins: bool = False,
     ) -> None:
         """
         Initialize the handler with the JSON keys to read from the response.
@@ -176,6 +178,10 @@ class JsonSchemaResponseHandler(ResponseHandler):
             numeric_value (bool): When True, ``parse`` requires the parsed score value to be
                 parsable as a finite float and raises ``InvalidJsonException`` otherwise. Defaults
                 to False.
+            response_category_wins (bool): When True, a category present in both the response and
+                the ``category`` argument to ``parse`` is no longer an error: the response category
+                is used and the argument is treated as a fallback for when the response has none.
+                When False (the default), that combination raises ``ValueError``. Defaults to False.
         """
         self._score_value_output_key = score_value_output_key
         self._rationale_output_key = rationale_output_key
@@ -184,6 +190,7 @@ class JsonSchemaResponseHandler(ResponseHandler):
         self._category_output_key = category_output_key
         self._response_schema = response_schema
         self._numeric_value = numeric_value
+        self._response_category_wins = response_category_wins
 
     @property
     def json_response_config(self) -> JsonResponseConfig:
@@ -208,7 +215,9 @@ class JsonSchemaResponseHandler(ResponseHandler):
                 request, stored on the resulting score.
             scored_prompt_id (str | uuid.UUID): The ID of the message piece being scored.
             category (Sequence[str] | str | None): The category of the score. May instead be parsed
-                from the response; supplying both is an error. Defaults to None.
+                from the response. Supplying both is an error unless this handler was configured
+                with ``response_category_wins``, in which case the response category is used and
+                this argument is the fallback. Defaults to None.
             objective (str | None): The objective associated with the score, used for
                 contextualizing the result. Defaults to None.
 
@@ -217,8 +226,9 @@ class JsonSchemaResponseHandler(ResponseHandler):
                 normalized and validated by the caller.
 
         Raises:
-            ValueError: If a category is present in both the response and the argument, or the
-                parsed category is not a string or a list of strings.
+            ValueError: If a category is present in both the response and the argument and this
+                handler was not configured with ``response_category_wins``, or the parsed category
+                is not a string or a list of strings.
             InvalidJsonException: If the response is invalid JSON, is not a top-level JSON object,
                 is missing a required key, or (when this handler is numeric) the score value is not
                 parsable as a finite float.
@@ -241,6 +251,7 @@ class JsonSchemaResponseHandler(ResponseHandler):
                 scored_prompt_id=scored_prompt_id,
                 category=category,
                 objective=objective,
+                response_category_wins=self._response_category_wins,
             )
 
         except json.JSONDecodeError:
