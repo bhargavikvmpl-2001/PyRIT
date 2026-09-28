@@ -87,3 +87,41 @@ def test_true_false_response_handler_rejects_value_outside_domain() -> None:
             scorer_identifier=SCORER_IDENTIFIER,
             scored_prompt_id="test-id",
         )
+
+
+def test_json_schema_response_handler_rejects_category_conflict_by_default() -> None:
+    handler = JsonSchemaResponseHandler()
+
+    with pytest.raises(ValueError, match="Category is present in the response and an argument"):
+        handler.parse(
+            response_text='{"score_value": "true", "rationale": "r", "category": "violence"}',
+            scorer_identifier=SCORER_IDENTIFIER,
+            scored_prompt_id="test-id",
+            category="harm",
+        )
+
+
+def test_json_schema_response_handler_response_category_wins_prefers_response() -> None:
+    handler = JsonSchemaResponseHandler(response_category_wins=True)
+
+    score = handler.parse(
+        response_text='{"score_value": "true", "rationale": "r", "category": "violence"}',
+        scorer_identifier=SCORER_IDENTIFIER,
+        scored_prompt_id="test-id",
+        category="harm",
+    )
+
+    assert score.score_category == ["violence"]
+
+
+def test_json_schema_response_handler_response_category_wins_falls_back_to_argument() -> None:
+    handler = JsonSchemaResponseHandler(response_category_wins=True)
+
+    score = handler.parse(
+        response_text='{"score_value": "true", "rationale": "r"}',
+        scorer_identifier=SCORER_IDENTIFIER,
+        scored_prompt_id="test-id",
+        category="harm",
+    )
+
+    assert score.score_category == ["harm"]

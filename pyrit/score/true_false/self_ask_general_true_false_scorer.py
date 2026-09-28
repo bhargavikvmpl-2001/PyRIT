@@ -108,6 +108,9 @@ class SelfAskGeneralTrueFalseScorer(MessageTrueFalseScorer):
         self._prompt_format_string = prompt_format_string
 
         self._score_category = category
+        # response_category_wins=True matches the docstring above: a category in the response is
+        # used, and the `category` argument only applies as a fallback when the response has none,
+        # instead of the two being treated as a conflicting error.
         wire_format_handler = response_handler or JsonSchemaResponseHandler(
             score_value_output_key=score_value_output_key,
             rationale_output_key=rationale_output_key,
@@ -115,6 +118,7 @@ class SelfAskGeneralTrueFalseScorer(MessageTrueFalseScorer):
             metadata_output_key=metadata_output_key,
             category_output_key=category_output_key,
             response_schema=response_json_schema,
+            response_category_wins=True,
         )
         # Keep score-domain validation in the parser callback so invalid semantic values retry.
         self._response_handler = TrueFalseResponseHandler(response_handler=wire_format_handler)

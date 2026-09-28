@@ -266,6 +266,54 @@ def test_get_scorer_metrics_uses_configured_result_file(patch_central_database, 
     mock_find.assert_called_once_with(eval_hash="abc123", file_path=result_file)
 
 
+async def test_general_float_scorer_uses_response_category_over_configured(patch_central_database):
+    chat_target = MagicMock()
+    chat_target.get_identifier.return_value = get_mock_target_identifier("MockChatTarget")
+    json_response = (
+        dedent(
+            """
+        {"score_value": 75,
+         "rationale": "This is the rationale.",
+         "category": "response_category"}
+        """
+        )
+        .strip()
+        .replace("\n", " ")
+    )
+    response = Message(message_pieces=[MessagePiece(role="assistant", original_value=json_response)])
+    chat_target.send_prompt_async = AsyncMock(return_value=[response])
+
+    scorer = SelfAskGeneralFloatScaleScorer(
+        chat_target=chat_target,
+        system_prompt_format_string="This is a system prompt.",
+        scale=DEFAULT_RANGE,
+    )
+
+    score = await scorer.score_text_async(text="test prompt", objective="test objective")
+
+    assert len(score) == 1
+    assert score[0].score_category == ["response_category"]
+
+
+async def test_general_float_scorer_falls_back_to_configured_category(
+    patch_central_database, general_float_scorer_response: Message
+):
+    chat_target = MagicMock()
+    chat_target.get_identifier.return_value = get_mock_target_identifier("MockChatTarget")
+    chat_target.send_prompt_async = AsyncMock(return_value=[general_float_scorer_response])
+
+    scorer = SelfAskGeneralFloatScaleScorer(
+        chat_target=chat_target,
+        system_prompt_format_string="This is a system prompt.",
+        scale=DEFAULT_RANGE,
+    )
+
+    score = await scorer.score_text_async(text="test prompt", objective="test objective")
+
+    assert len(score) == 1
+    assert score[0].score_category == ["test_category"]
+
+
 def test_general_float_scale_no_chat_target_raises():
     with pytest.raises(ValueError, match="A chat_target must be provided"):
         SelfAskGeneralFloatScaleScorer(

@@ -99,6 +99,9 @@ class SelfAskGeneralFloatScaleScorer(MessageFloatScaleScorer):
         self._scale = scale
         # A caller-supplied handler owns its own response contract; otherwise the default JSON
         # handler carries the schema and enforces the numeric score contract for the round-trip.
+        # response_category_wins=True matches the docstring above: a category in the response is
+        # used, and the configured scale category only applies as a fallback when the response has
+        # none, instead of the two being treated as a conflicting error.
         self._response_handler = response_handler or JsonSchemaResponseHandler(
             score_value_output_key=score_value_output_key,
             rationale_output_key=rationale_output_key,
@@ -107,6 +110,7 @@ class SelfAskGeneralFloatScaleScorer(MessageFloatScaleScorer):
             category_output_key=category_output_key,
             response_schema=response_json_schema,
             numeric_value=True,
+            response_category_wins=True,
         )
 
     def _build_identifier(self) -> ComponentIdentifier:
