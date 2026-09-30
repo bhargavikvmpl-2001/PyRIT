@@ -272,9 +272,7 @@ class PromptMemoryEntry(Base):
         {"extend_existing": True},
     )
     id = mapped_column(CustomUUID, nullable=False, primary_key=True)
-    role: Mapped[Literal["system", "user", "assistant", "simulated_assistant", "tool", "developer"]] = mapped_column(
-        String, nullable=False
-    )
+    role: Mapped[ChatMessageRole] = mapped_column(String, nullable=False)
     # Bounded so SQL Server accepts it as an index key. 128 rather than 36 because
     # conversation_id is a free-form caller-supplied string, not necessarily a UUID.
     conversation_id = mapped_column(String(128), nullable=False)
@@ -840,6 +838,7 @@ class AttackIdentifierEntry(ComponentIdentifierEntry[AttackIdentifier]):
 
     adversarial_system_prompt: Mapped[str | None] = mapped_column(Unicode, nullable=True)
     adversarial_seed_prompt: Mapped[str | None] = mapped_column(Unicode, nullable=True)
+    adversarial_prompt_template: Mapped[str | None] = mapped_column(Unicode, nullable=True)
     objective_target_hash: Mapped[str | None] = mapped_column(
         String(64), ForeignKey(f"{TargetIdentifierEntry.__tablename__}.hash"), nullable=True
     )
@@ -1466,6 +1465,7 @@ class SeedEntry(Base):
             are stored, this is used to order the prompts.
         role (str): The role of the prompt (e.g., user, system, assistant).
         seed_type (SeedType): The type of seed - "prompt", "objective", or "simulated_conversation".
+        conditions (list[dict[str, Any]] | None): Serialized objective criteria, absent for other seeds.
 
     Methods:
         __str__(): Returns a string representation of the memory entry.
@@ -1492,6 +1492,7 @@ class SeedEntry(Base):
     sequence: Mapped[int | None] = mapped_column(INTEGER, nullable=True)
     role: Mapped[ChatMessageRole | None] = mapped_column(String, nullable=True)
     seed_type: Mapped[SeedType] = mapped_column(String, nullable=False, default="prompt")
+    conditions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
 
     def __init__(self, *, entry: Seed) -> None:
         """
@@ -1524,6 +1525,11 @@ class SeedEntry(Base):
         self.prompt_metadata = self._pack_seed_metadata(entry)
         self.prompt_group_id = entry.prompt_group_id
         self.seed_type = seed_type
+        self.conditions = (
+            entry.model_dump(mode="json", include={"conditions"})["conditions"] or None
+            if isinstance(entry, SeedObjective)
+            else None
+        )
 
         # SeedPrompt-specific fields
         if isinstance(entry, SeedPrompt):
@@ -1620,7 +1626,14 @@ class SeedEntry(Base):
 
         Returns:
             Seed: The reconstructed seed object (SeedPrompt, SeedObjective, or SeedSimulatedConversation)
+
+        Raises:
+            ValueError: If persisted conditions are invalid or attached to a non-objective seed,
+                or a simulated conversation record cannot be rebuilt, for example when it names
+                a prompt file that is not present on this machine.
         """
+        if self.seed_type != "objective" and self.conditions not in (None, []):
+            raise ValueError("Only objective seeds can have persisted conditions.")
         cleaned_metadata, decoded_schema = self._unpack_seed_metadata(self.prompt_metadata)
         if self.seed_type == "objective":
             return SeedObjective(
@@ -1638,30 +1651,55 @@ class SeedEntry(Base):
                 added_by=self.added_by,
                 metadata=cleaned_metadata,
                 prompt_group_id=self.prompt_group_id,
+                conditions=self.conditions if self.conditions is not None else (),
             )
         if self.seed_type == "simulated_conversation":
-            # Reconstruct SeedSimulatedConversation from JSON value
+            # Reconstruct SeedSimulatedConversation from JSON value. Records written before the
+            # prompts were normalized carry only ``*_path`` keys; the model's compatibility
+            # adapter resolves those, and a canonicalized record loses the stale hash of its
+            # old path-shaped value.
             config = json.loads(self.value)
-            return SeedSimulatedConversation(
-                id=self.id,
-                value_sha256=self.value_sha256,
-                name=self.name,
-                dataset_name=self.dataset_name,
-                harm_categories=self.harm_categories,
-                description=self.description,
-                authors=self.authors,
-                groups=self.groups,
-                source=self.source,
-                date_added=self.date_added,
-                added_by=self.added_by,
-                metadata=cleaned_metadata,
-                prompt_group_id=self.prompt_group_id,
-                num_turns=config.get("num_turns", 3),
-                sequence=config.get("sequence", 0),
-                adversarial_chat_system_prompt_path=config.get("adversarial_chat_system_prompt_path"),
-                simulated_target_system_prompt_path=config.get("simulated_target_system_prompt_path"),
-                next_message_system_prompt_path=config.get("next_message_system_prompt_path"),
-            )
+            prompt_config = {
+                key: config[key]
+                for key in (
+                    "adversarial_chat_system_prompt",
+                    "adversarial_chat_system_prompt_path",
+                    "simulated_target_system_prompt",
+                    "simulated_target_system_prompt_path",
+                    "next_message_system_prompt",
+                    "next_message_system_prompt_path",
+                )
+                if config.get(key) is not None
+            }
+            is_legacy_record = any(key.endswith("_path") for key in prompt_config)
+            try:
+                return SeedSimulatedConversation(
+                    id=self.id,
+                    value_sha256=None if is_legacy_record else self.value_sha256,
+                    name=self.name,
+                    dataset_name=self.dataset_name,
+                    harm_categories=self.harm_categories,
+                    description=self.description,
+                    authors=self.authors,
+                    groups=self.groups,
+                    source=self.source,
+                    date_added=self.date_added,
+                    added_by=self.added_by,
+                    metadata=cleaned_metadata,
+                    prompt_group_id=self.prompt_group_id,
+                    num_turns=config.get("num_turns", 3),
+                    sequence=config.get("sequence", 0),
+                    pyrit_version=config.get("pyrit_version"),
+                    **prompt_config,
+                )
+            except (OSError, ValueError) as exc:
+                # A legacy record names prompt files by absolute path, so one written elsewhere
+                # can reference a file this machine does not have. Name the record so a single
+                # bad row is identifiable rather than an opaque failure of the whole query.
+                raise ValueError(
+                    f"Could not rebuild simulated conversation seed {self.id} "
+                    f"(name={self.name!r}, dataset={self.dataset_name!r}): {exc}"
+                ) from exc
         return SeedPrompt(
             id=self.id,
             value=self.value,

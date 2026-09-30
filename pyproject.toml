@@ -45,6 +45,7 @@ dependencies = [
     "fastapi>=0.133.0",
     "httpx[http2]>=0.27.2",
     "jinja2>=3.1.6",
+    "mcp>=1.26,<2",
     "numpy>=1.26.0; python_version < '3.14'",
     "numpy>=2.3.0; python_version >= '3.14'",
     "openai>=2.2.0",
@@ -286,8 +287,10 @@ include = ["pyrit", "pyrit.*"]
 license-files = [
     "LICENSE",
     "LICENSES/Apache-2.0.txt",
+    "LICENSES/PromptInject-MIT.txt",
     "THIRD_PARTY_NOTICES.txt",
     "third_party/garak-provenance.json",
+    "third_party/promptinject-provenance.json",
 ]
 
 [tool.setuptools.package-data]

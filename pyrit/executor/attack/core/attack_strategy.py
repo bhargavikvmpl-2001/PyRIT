@@ -19,6 +19,7 @@ from pyrit.exceptions.retry_collector import (
     get_retry_collector,
 )
 from pyrit.executor.attack.core.attack_parameters import AttackParameters, AttackParamsT
+from pyrit.executor.attack.core.attack_scoring import prepare_attack_scoring
 from pyrit.executor.core import (
     Strategy,
     StrategyContext,
@@ -44,7 +45,6 @@ from pyrit.models import (
     UndeterminedScoreError,
 )
 from pyrit.prompt_target.common.target_requirements import TargetRequirements
-from pyrit.score import Scorer
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -698,11 +698,15 @@ class AttackStrategy(Strategy[AttackStrategyContextT, AttackStrategyResultT], Id
         adversarial_chat: TargetIdentifier | None = None
         adversarial_system_prompt: str | None = None
         adversarial_seed_prompt: str | None = None
+        adversarial_prompt_template: str | None = None
         adversarial_config = self.get_attack_adversarial_config()
         if adversarial_config is not None and getattr(adversarial_config, "target", None) is not None:
             adversarial_chat = TargetIdentifier.from_component_identifier(adversarial_config.target.get_identifier())
             adversarial_system_prompt = self._extract_adversarial_prompt_text(adversarial_config.system_prompt)
             adversarial_seed_prompt = self._extract_adversarial_prompt_text(adversarial_config.first_message)
+            adversarial_prompt_template = self._extract_adversarial_prompt_text(
+                adversarial_config.adversarial_prompt_template
+            )
 
         # Add request converter identifiers if present
         request_converters: list[ConverterIdentifier] | None = None
@@ -733,6 +737,7 @@ class AttackStrategy(Strategy[AttackStrategyContextT, AttackStrategyResultT], Id
             response_converters=response_converters,
             adversarial_system_prompt=adversarial_system_prompt,
             adversarial_seed_prompt=adversarial_seed_prompt,
+            adversarial_prompt_template=adversarial_prompt_template,
         )
 
     @staticmethod
@@ -864,12 +869,19 @@ class AttackStrategy(Strategy[AttackStrategyContextT, AttackStrategyResultT], Id
         if self.DELEGATES_SCORING:
             return
         scoring_config = self.get_attack_scoring_config()
-        scorers: list[Scorer] = []
-        if scoring_config is not None:
-            scorers.extend(scoring_config.auxiliary_scorers)
-            if scoring_config.objective_scorer is not None:
-                scorers.append(scoring_config.objective_scorer)
-        Scorer.validate_expectation_for_scorers(scorers=scorers, expectation=context.expectation)
+        auxiliary_scorers = scoring_config.auxiliary_scorers if scoring_config is not None else []
+        prepared = prepare_attack_scoring(
+            objective_scorer=scoring_config.objective_scorer if scoring_config is not None else None,
+            auxiliary_scorers=auxiliary_scorers,
+            expectation=context.expectation,
+        )
+        applied = {id(scorer) for scorer in prepared.auxiliary_scorers}
+        skipped = [type(scorer).__name__ for scorer in auxiliary_scorers if id(scorer) not in applied]
+        if skipped:
+            logger.warning(
+                "Auxiliary scorer(s) %s will not run: the expectation lacks a condition they require.",
+                ", ".join(skipped),
+            )
 
     @overload
     async def execute_async(

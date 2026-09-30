@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 import type { Page, Route, TestInfo } from '@playwright/test'
 
+import { READY_RUNTIME, READY_RUNTIME_STATUS } from './_runtime'
+
 interface PresetCase {
   readonly id: string
   readonly label: string
@@ -29,6 +31,7 @@ const API_RESPONSES: Record<string, unknown> = {
   '/api/auth/config': { clientId: '', tenantId: '', allowedGroupIds: '' },
   '/api/auth/access': { isAdmin: true },
   '/api/health': { status: 'healthy' },
+  '/api/runtime': READY_RUNTIME,
   '/api/version': { version: 'theme-preview', display: 'theme-preview' },
   '/api/targets': EMPTY_PAGE,
   '/api/targets/catalog': { items: [] },
@@ -47,6 +50,7 @@ const API_RESPONSES: Record<string, unknown> = {
     queued: [],
   },
   '/api/config': { content: 'initializers: []\n', source: 'theme-preview', version: '1' },
+  '/api/config/runtime': READY_RUNTIME_STATUS,
   '/api/config/env-files': { items: [] },
   '/api/initializers': EMPTY_PAGE,
   '/api/initializers/custom': { items: [] },
@@ -129,7 +133,9 @@ test.describe('Theme presets', () => {
       await page.emulateMedia({ forcedColors: 'active' })
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'high-contrast')
       await expect(background).toHaveCount(0)
-      expect(await page.evaluate(() => localStorage.getItem('pyrit.themeMode'))).toBe(id)
+      expect(await page.evaluate(() => JSON.parse(
+        localStorage.getItem('pyrit.userPreferences.v1.local') ?? '{}',
+      ).theme)).toBe(id)
       if (id === 'jimothy') {
         await page.screenshot({ path: testInfo.outputPath('high-contrast.png') })
       }
