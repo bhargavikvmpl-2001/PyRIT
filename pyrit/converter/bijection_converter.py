@@ -276,8 +276,9 @@ class DigitBijectionConverter(BijectionConverter):
             f"({self._LITERAL_MARKER * 2}), so that every unescaped run of digits is made only of table tokens. "
             "Preserve spaces and all other punctuation. "
             "Join adjacent digit tokens without separators. To decode, scan from left to right. "
-            "Consume a tilde together with the single character after it first: two tildes are one literal tilde, "
-            "and a tilde before a digit is that literal digit. "
+            "Decode a tilde followed by another tilde or a digit before looking up digit tokens: "
+            "two tildes are one literal tilde, and a tilde before a digit is that literal digit. "
+            "Preserve a tilde that is not followed by another tilde or a digit. "
             "Consume doubled apostrophes as one literal apostrophe before checking for a single uppercase marker. "
             "Reverse the table for each digit token, making its letter uppercase only when preceded by that marker. "
             f"Examples: {examples}. When a user message is in this notation, read it by reversing these rules, "
@@ -371,6 +372,8 @@ class DigitBijectionConverter(BijectionConverter):
         """
         Decode digit-token text back to plaintext.
 
+        Unrecognized characters and incomplete escapes are preserved.
+
         Args:
             encoded_text (str): The encoded text to decode.
 
@@ -384,7 +387,7 @@ class DigitBijectionConverter(BijectionConverter):
             # before any digit run is considered for token lookup.
             if encoded_text[i] == self._LITERAL_MARKER:
                 escaped = encoded_text[i + 1 : i + 2]
-                if escaped == self._LITERAL_MARKER or escaped in string.digits:
+                if escaped and (escaped == self._LITERAL_MARKER or escaped in string.digits):
                     decoded += escaped
                     i += 2
                     continue
